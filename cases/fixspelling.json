@@ -1,0 +1,17 @@
+{
+    "caseName": "fix_spelling",
+    "cases": [
+        {
+            "id": "1",
+            "name": "Case 1",
+            "description": "Case 1 description",
+            "content": "Case 1 content"
+        },
+        {
+            "id": "2",
+            "name": "Case 2",
+            "description": "Case 2 description",
+            "content": "Case 2 content"
+        }
+    ]
+}
