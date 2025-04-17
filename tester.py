@@ -67,20 +67,23 @@ class AIPromptTester:
             self._loading_stop.set()
             if self._loading_thread:
                 self._loading_thread.join()
-            # 清除当前行
-            sys.stdout.write("\r" + " " * 100)
-            sys.stdout.write("\r")
-            sys.stdout.flush()
+            # 清屏，准备显示新内容
+            os.system('cls' if os.name == 'nt' else 'clear')
             
     def _loading_animation(self, message):
         """显示加载动画"""
         spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
         i = 0
         last_update = 0
+        
+        # 首次清屏
+        os.system('cls' if os.name == 'nt' else 'clear')
+        
         while not self._loading_stop.is_set():
             i = (i + 1) % len(spinner)
-            # 使用\r回车不换行来覆盖当前行，不清屏
-            sys.stdout.write(f"\r{LogColor.BOLD}{LogColor.CYAN}{spinner[i]}{LogColor.RESET} {message}")
+            # 清屏后再输出新内容，保持界面稳定
+            os.system('cls' if os.name == 'nt' else 'clear')
+            sys.stdout.write(f"{LogColor.BOLD}{LogColor.CYAN}{spinner[i]}{LogColor.RESET} {message}")
             sys.stdout.flush()
             time.sleep(0.03)  # 进一步加快动画速度，从0.05改为0.03
         
@@ -599,24 +602,12 @@ class AIPromptTester:
         # 更新最后刷新时间
         self._last_console_update = current_time
         
-        # 使用局部清屏方法替代全屏清除，提高性能
-        # 首先计算需要输出的行数
-        lines_count = 1  # 全局进度条
-        lines_count += 1  # 空行
-        for round_num in self._round_progress:
-            lines_count += 1  # 轮次进度条
-            # 每个轮次的提示词数量
-            prompt_count = sum(1 for k in self._prompt_progress if k.startswith(f"round_{round_num}_"))
-            lines_count += prompt_count
-            # 每个提示词的测试用例数量
-            for key in self._prompt_progress:
-                if key.startswith(f"round_{round_num}_"):
-                    prompt_name = key.split('_', 2)[2]
-                    case_count = sum(1 for k in self._case_progress if k.startswith(f"round_{round_num}_{prompt_name}_"))
-                    lines_count += case_count
+        # 初始化状态变量
+        if not hasattr(self, '_is_first_output'):
+            self._is_first_output = True
         
-        # 回到控制台顶部（如果有必要）并清除之前的输出
-        sys.stdout.write(f"\033[{lines_count}A\033[J" if lines_count > 1 else "\r\033[J")
+        # 构建输出内容字符串
+        output_str = ""
         
         # 动态加载动画字符 - 增加频率修饰因子，使刷新更快
         spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
@@ -630,8 +621,7 @@ class AIPromptTester:
         bar = '█' * filled_length + '░' * (bar_length - filled_length)
         status = f"[{self.completed_cases}/{self.total_cases}]"
         
-        print(f"{LogColor.BOLD}{LogColor.CYAN}{spinner_char}{LogColor.RESET} 执行测试 {status} {progress:.1f}% |{bar}|")
-        print()
+        output_str += f"{LogColor.BOLD}{LogColor.CYAN}{spinner_char}{LogColor.RESET} 执行测试 {status} {progress:.1f}% |{bar}|\n\n"
         
         # 显示每个轮次的进度
         for round_num, round_data in sorted(self._round_progress.items()):
@@ -649,7 +639,7 @@ class AIPromptTester:
             round_spinner_char = spinner_chars[round_spinner_idx]
             
             # 使用动态spinner
-            print(f"{prefix}{round_spinner_char}{suffix} 执行第{round_num}轮 {progress:.1f}% |{bar}|")
+            output_str += f"{prefix}{round_spinner_char}{suffix} 执行第{round_num}轮 {progress:.1f}% |{bar}|\n"
             
             # 显示轮次中每个提示词的进度
             for key, prompt_data in self._prompt_progress.items():
@@ -665,7 +655,7 @@ class AIPromptTester:
                     prompt_spinner_char = spinner_chars[prompt_spinner_idx]
                     
                     # 使用动态spinner
-                    print(f"  {prefix}{prompt_spinner_char}{suffix} 执行 {prompt_name} 的测试用例 {prompt_progress:.1f}% |{prompt_bar}|")
+                    output_str += f"  {prefix}{prompt_spinner_char}{suffix} 执行 {prompt_name} 的测试用例 {prompt_progress:.1f}% |{prompt_bar}|\n"
                     
                     # 显示正在执行的测试用例
                     for case_key, case_data in self._case_progress.items():
@@ -676,7 +666,17 @@ class AIPromptTester:
                             case_spinner_char = spinner_chars[case_spinner_idx]
                             
                             # 使用动态spinner
-                            print(f"    {prefix}{case_spinner_char}{suffix} 执行测试 [{case_data['index']}/{case_data['total']}] [{prompt_name}] {case_data['status']} {case_data['vendor']} API ({case_data['model']}) 处理用例 {case_data['case_name']}...")
+                            output_str += f"    {prefix}{case_spinner_char}{suffix} 执行测试 [{case_data['index']}/{case_data['total']}] [{prompt_name}] {case_data['status']} {case_data['vendor']} API ({case_data['model']}) 处理用例 {case_data['case_name']}...\n"
         
-        # 保持光标在底部
-        print() 
+        # 直接清屏并打印
+        if self._is_first_output:
+            # 首次运行，清屏后再输出（确保清屏命令执行）
+            os.system('cls' if os.name == 'nt' else 'clear')
+            sys.stdout.write(output_str)
+            sys.stdout.flush()
+            self._is_first_output = False
+        else:
+            # 清屏并输出新内容
+            os.system('cls' if os.name == 'nt' else 'clear')
+            sys.stdout.write(output_str)
+            sys.stdout.flush() 
