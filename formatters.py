@@ -7,6 +7,8 @@ import xml.dom.minidom
 import xml.etree.ElementTree as ET
 import html
 from typing import Dict, List, Any
+import time
+from pathlib import Path
 
 from logger import log_info
 from utils import TestResult
@@ -89,33 +91,49 @@ def save_results_as_xml(all_results: Dict[str, List[TestResult]], output_dir: st
     log_info(f"测试结果已保存到: {file_path}")
     return file_path
 
-def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: str):
-    """将测试结果保存为HTML单页文件，使用Blueprint UI风格"""
-    # 生成带时间戳的文件名
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_path = os.path.join(output_dir, f"test_results_{timestamp}.html")
+def save_results_as_html(test_results: Dict[str, Dict[str, List[TestResult]]], output_dir: str, filename_prefix: str = "test_results") -> str:
+    """保存测试结果为HTML格式的报告
+    
+    参数:
+    - test_results: 测试结果字典，键为轮次，值为提示词-测试结果列表的字典
+    - output_dir: 输出目录
+    - filename_prefix: 文件名前缀，默认为"test_results"
+    
+    返回:
+    - 保存的HTML文件路径
+    """
+    # 创建输出目录（如果不存在）
+    Path(output_dir).mkdir(exist_ok=True)
+    
+    # 生成文件名，使用时间戳确保唯一性
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    html_filename = f"{filename_prefix}_{timestamp}.html"
+    html_path = os.path.join(output_dir, html_filename)
     
     # 测试时间
     test_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # 计算统计数据
-    total_cases = sum(len(results) for results in all_results.values())
-    avg_response_time = 0
+    total_rounds = len(test_results)
+    total_prompts = set()
+    total_cases = 0
     total_tokens = 0
     total_time = 0
     
-    for prompt_results in all_results.values():
-        for result in prompt_results:
-            total_time += result["elapsed_time"]
-            
-            # 计算token总数，注意处理不同模型的token格式
-            if "total_tokens" in result["tokens"]:
-                total_tokens += result["tokens"]["total_tokens"]
-            elif "input_tokens" in result["tokens"] and "output_tokens" in result["tokens"]:
-                total_tokens += result["tokens"]["input_tokens"] + result["tokens"]["output_tokens"]
+    for round_name, round_results in test_results.items():
+        for prompt_name, results in round_results.items():
+            total_prompts.add(prompt_name)
+            total_cases += len(results)
+            for result in results:
+                total_time += result["elapsed_time"]
+                
+                # 计算token总数，注意处理不同模型的token格式
+                if "total_tokens" in result["tokens"]:
+                    total_tokens += result["tokens"]["total_tokens"]
+                elif "input_tokens" in result["tokens"] and "output_tokens" in result["tokens"]:
+                    total_tokens += result["tokens"]["input_tokens"] + result["tokens"]["output_tokens"]
     
-    if total_cases > 0:
-        avg_response_time = total_time / total_cases
+    avg_response_time = total_time / total_cases if total_cases > 0 else 0
     
     # HTML头部
     html_content = f'''<!DOCTYPE html>
@@ -256,6 +274,9 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
             display: flex;
             border-bottom: 1px solid var(--bp-gray-3);
             margin-bottom: 24px;
+            overflow-x: auto;
+            white-space: nowrap;
+            -webkit-overflow-scrolling: touch;
         }}
         
         .tab {{
@@ -284,6 +305,39 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
             display: block;
         }}
         
+        .nested-tab-content {{
+            display: none;
+        }}
+        
+        .nested-tab-content.active {{
+            display: block;
+        }}
+        
+        .round-tabs {{
+            display: flex;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--bp-gray-3);
+        }}
+        
+        .round-tab {{
+            padding: 8px 16px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-weight: 500;
+            color: var(--bp-gray-7);
+            font-size: 13px;
+            transition: all 0.2s;
+        }}
+        
+        .round-tab.active {{
+            color: var(--bp-green-7);
+            border-bottom-color: var(--bp-green-7);
+        }}
+        
+        .round-tab:hover {{
+            color: var(--bp-green-6);
+        }}
+        
         .prompt-section {{
             margin-bottom: 32px;
         }}
@@ -291,37 +345,44 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
         .prompt-title {{
             font-size: 18px;
             font-weight: 600;
+            color: var(--bp-gray-9);
             margin-bottom: 16px;
             display: flex;
             align-items: center;
+            justify-content: space-between;
         }}
         
         .prompt-badge {{
-            display: inline-block;
             font-size: 12px;
-            font-weight: 500;
-            padding: 2px 8px;
+            font-weight: normal;
+            color: var(--bp-gray-7);
+            background-color: var(--bp-gray-2);
+            padding: 4px 8px;
             border-radius: 12px;
-            margin-left: 8px;
-            background-color: var(--bp-blue-1);
-            color: var(--bp-blue-7);
+        }}
+        
+        .cases {{
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
         }}
         
         .case-card {{
             background-color: white;
             border-radius: var(--radius);
-            box-shadow: var(--shadow-sm);
-            margin-bottom: 16px;
             overflow: hidden;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s;
         }}
         
         .case-header {{
-            padding: 16px;
-            border-bottom: 1px solid var(--bp-gray-2);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding: 12px 16px;
+            background-color: var(--bp-gray-2);
             cursor: pointer;
+            user-select: none;
         }}
         
         .case-title {{
@@ -329,12 +390,12 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
             color: var(--bp-gray-9);
             display: flex;
             align-items: center;
+            gap: 8px;
         }}
         
         .case-id {{
             font-size: 12px;
             color: var(--bp-gray-6);
-            margin-left: 8px;
         }}
         
         .case-metrics {{
@@ -344,27 +405,35 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
             color: var(--bp-gray-7);
         }}
         
-        .case-metric {{
-            display: flex;
-            align-items: center;
-        }}
-        
         .case-metric-value {{
-            font-weight: 500;
-            margin-left: 4px;
+            font-weight: 600;
             color: var(--bp-gray-8);
         }}
         
         .case-content {{
-            padding: 0;
             max-height: 0;
             overflow: hidden;
-            transition: max-height 0.3s, padding 0.3s;
+            transition: max-height 0.3s ease-out;
         }}
         
         .case-content.expanded {{
-            padding: 16px;
             max-height: 2000px;
+        }}
+        
+        .case-section {{
+            padding: 16px;
+            border-bottom: 1px solid var(--bp-gray-2);
+        }}
+        
+        .case-section:last-child {{
+            border-bottom: none;
+        }}
+        
+        .case-section-title {{
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--bp-gray-8);
+            margin-bottom: 8px;
         }}
         
         .case-grid {{
@@ -373,53 +442,47 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
             gap: 16px;
         }}
         
-        .case-section {{
-            margin-bottom: 16px;
-        }}
-        
-        .case-section-title {{
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: var(--bp-gray-7);
-            margin-bottom: 8px;
-            letter-spacing: 0.5px;
+        @media (max-width: 768px) {{
+            .case-grid {{
+                grid-template-columns: 1fr;
+            }}
         }}
         
         .code-block {{
             background-color: var(--bp-gray-1);
-            border-radius: var(--radius);
             padding: 12px;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-            font-size: 12px;
-            line-height: 1.4;
-            overflow-x: auto;
+            border-radius: 4px;
+            font-family: monospace;
             white-space: pre-wrap;
             word-break: break-word;
-            border: 1px solid var(--bp-gray-3);
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
         }}
         
         .token-list {{
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            display: flex;
+            flex-wrap: wrap;
             gap: 8px;
         }}
         
         .token-item {{
             background-color: var(--bp-gray-2);
-            border-radius: var(--radius);
-            padding: 8px 12px;
+            border-radius: 4px;
+            padding: 4px 8px;
             font-size: 12px;
             display: flex;
+            align-items: center;
             justify-content: space-between;
+            gap: 8px;
         }}
         
         .token-name {{
-            color: var(--bp-gray-7);
+            color: var(--bp-gray-8);
         }}
         
         .token-value {{
-            font-weight: 500;
+            font-weight: 600;
             color: var(--bp-gray-9);
         }}
         
@@ -428,35 +491,25 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
             border-collapse: collapse;
         }}
         
-        .args-table th,
-        .args-table td {{
-            padding: 8px 12px;
+        .args-table th, .args-table td {{
+            padding: 8px;
             text-align: left;
             border-bottom: 1px solid var(--bp-gray-3);
         }}
         
         .args-table th {{
-            font-weight: 500;
-            color: var(--bp-gray-7);
+            font-weight: 600;
+            color: var(--bp-gray-8);
+            background-color: var(--bp-gray-2);
         }}
         
-        .toggle-btn {{
-            background-color: transparent;
-            border: none;
-            cursor: pointer;
-            color: var(--bp-blue-6);
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            font-size: 12px;
-        }}
-        
-        .toggle-btn svg {{
-            margin-right: 4px;
-            transition: transform 0.2s;
-        }}
-        
-        .toggle-btn.collapsed svg {{
+        .case-expand-icon {{
+            margin-left: auto;
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            text-align: center;
+            line-height: 16px;
             transform: rotate(-90deg);
         }}
         
@@ -481,13 +534,13 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
         
         <div class="stats-cards">
             <div class="stat-card">
-                <div class="stat-card-title">测试用例总数</div>
-                <div class="stat-card-value">{total_cases}</div>
+                <div class="stat-card-title">提示词数量</div>
+                <div class="stat-card-value">{len(total_prompts)}</div>
             </div>
             
             <div class="stat-card">
-                <div class="stat-card-title">提示词数量</div>
-                <div class="stat-card-value">{len(all_results)}</div>
+                <div class="stat-card-title">测试用例总数</div>
+                <div class="stat-card-value">{total_cases}</div>
             </div>
             
             <div class="stat-card">
@@ -500,114 +553,132 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
                 <div class="stat-card-value">{total_tokens:,}<span class="stat-card-unit">tokens</span></div>
             </div>
         </div>
-        
-        <div class="tabs">
-            <div class="tab active" data-tab="results">测试结果</div>
-        </div>
-        
         <div class="tab-content active" id="results">
+            <div class="round-tabs">
 '''
     
-    # 添加每个提示词的测试结果
-    for prompt_name, results in all_results.items():
-        # 确定模型和提供商
-        model = results[0]["model"] if results else ""
-        vendor = results[0]["vendor"] if results else ""
-        
+    # 添加轮次标签
+    round_names = list(test_results.keys())
+    for i, round_name in enumerate(round_names):
+        is_active = "active" if i == 0 else ""
         html_content += f'''
-        <div class="prompt-section">
-            <h2 class="prompt-title">
-                {html.escape(prompt_name)}
-                <span class="prompt-badge">{html.escape(vendor)} - {html.escape(model)}</span>
-            </h2>
-            
-            <div class="cases">
+                <div class="round-tab {is_active}" data-round="{i}">{round_name}</div>'''
+    
+    html_content += '''
+            </div>
+'''
+    
+    # 添加每个轮次的测试结果
+    for i, (round_name, round_results) in enumerate(test_results.items()):
+        is_active = "active" if i == 0 else ""
+        html_content += f'''
+            <div class="nested-tab-content {is_active}" id="round-{i}">
 '''
         
-        for idx, result in enumerate(results):
-            # 格式化token信息
-            token_html = '<div class="token-list">'
-            for token_key, token_value in result["tokens"].items():
-                token_html += f'''
-                <div class="token-item">
-                    <span class="token-name">{html.escape(token_key)}</span>
-                    <span class="token-value">{token_value:,}</span>
-                </div>'''
-            token_html += '</div>'
-            
-            # 格式化参数信息
-            args_html = ''
-            if result["case_args"]:
-                args_html = '''
-                <div class="case-section">
-                    <div class="case-section-title">参数</div>
-                    <table class="args-table">
-                        <tr>
-                            <th>参数名</th>
-                            <th>值</th>
-                        </tr>'''
-                
-                for arg_key, arg_value in result["case_args"].items():
-                    args_html += f'''
-                        <tr>
-                            <td>{html.escape(arg_key)}</td>
-                            <td>{html.escape(str(arg_value))}</td>
-                        </tr>'''
-                
-                args_html += '''
-                    </table>
-                </div>'''
+        # 添加每个提示词的测试结果
+        for prompt_name, results in round_results.items():
+            # 确定模型和提供商
+            model = results[0]["model"] if results else ""
+            vendor = results[0]["vendor"] if results else ""
             
             html_content += f'''
-            <div class="case-card">
-                <div class="case-header" onclick="toggleCase(this)">
-                    <div class="case-title">
-                        {html.escape(result["case_name"])}
-                        <span class="case-id">#{result["case_id"]}</span>
-                    </div>
-                    <div class="case-metrics">
-                        <div class="case-metric">
-                            响应时间: <span class="case-metric-value">{result["elapsed_time"]:.2f}秒</span>
-                        </div>
-                    </div>
-                </div>
+                <div class="prompt-section">
+                    <h2 class="prompt-title">
+                        {html.escape(prompt_name)}
+                        <span class="prompt-badge">{html.escape(vendor)} - {html.escape(model)}</span>
+                    </h2>
+                    
+                    <div class="cases">
+'''
+            
+            for idx, result in enumerate(results):
+                # 格式化token信息
+                token_html = '<div class="token-list">'
+                for token_key, token_value in result["tokens"].items():
+                    token_html += f'''
+                        <div class="token-item">
+                            <span class="token-name">{html.escape(token_key)}</span>
+                            <span class="token-value">{token_value:,}</span>
+                        </div>'''
+                token_html += '</div>'
                 
-                <div class="case-content">
-                    <div class="case-section">
-                        <div class="case-section-title">用例描述</div>
-                        <div>{html.escape(result["case_description"] or "无描述")}</div>
-                    </div>
-                    
-                    {args_html}
-                    
-                    <div class="case-grid">
+                # 格式化参数信息
+                args_html = ''
+                if result["case_args"]:
+                    args_html = '''
                         <div class="case-section">
-                            <div class="case-section-title">用户输入</div>
-                            <div class="code-block">{html.escape(result["case_content"])}</div>
-                        </div>
-                        
-                        <div class="case-section">
-                            <div class="case-section-title">AI输出</div>
-                            <div class="code-block">{html.escape(result["output_content"])}</div>
-                        </div>
-                    </div>
+                            <div class="case-section-title">参数</div>
+                            <table class="args-table">
+                                <tr>
+                                    <th>参数名</th>
+                                    <th>值</th>
+                                </tr>'''
                     
-                    <div class="case-section">
-                        <div class="case-section-title">提示词</div>
-                        <div class="code-block">{html.escape(result["processed_prompt"])}</div>
-                    </div>
+                    for arg_key, arg_value in result["case_args"].items():
+                        args_html += f'''
+                                <tr>
+                                    <td>{html.escape(arg_key)}</td>
+                                    <td>{html.escape(str(arg_value))}</td>
+                                </tr>'''
                     
-                    <div class="case-section">
-                        <div class="case-section-title">Token使用情况</div>
-                        {token_html}
+                    args_html += '''
+                            </table>
+                        </div>'''
+                
+                html_content += f'''
+                        <div class="case-card">
+                            <div class="case-header" onclick="toggleCase(this)">
+                                <div class="case-title">
+                                    {html.escape(result["case_name"])}
+                                    <span class="case-id">#{result["case_id"]}</span>
+                                </div>
+                                <div class="case-metrics">
+                                    <div class="case-metric">
+                                        响应时间: <span class="case-metric-value">{result["elapsed_time"]:.2f}秒</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="case-content">
+                                <div class="case-section">
+                                    <div class="case-section-title">用例描述</div>
+                                    <div>{html.escape(result["case_description"] or "无描述")}</div>
+                                </div>
+                                
+                                {args_html}
+                                
+                                <div class="case-grid">
+                                    <div class="case-section">
+                                        <div class="case-section-title">用户输入</div>
+                                        <div class="code-block">{html.escape(result["case_content"])}</div>
+                                    </div>
+                                    
+                                    <div class="case-section">
+                                        <div class="case-section-title">AI输出</div>
+                                        <div class="code-block">{html.escape(result["output_content"])}</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="case-section">
+                                    <div class="case-section-title">提示词</div>
+                                    <div class="code-block">{html.escape(result["processed_prompt"])}</div>
+                                </div>
+                                
+                                <div class="case-section">
+                                    <div class="case-section-title">Token使用情况</div>
+                                    {token_html}
+                                </div>
+                            </div>
+                        </div>
+'''
+            
+            html_content += '''
                     </div>
                 </div>
-            </div>
 '''
         
         html_content += '''
             </div>
-        </div>
 '''
     
     # HTML尾部
@@ -642,9 +713,31 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
             document.getElementById(tabId).classList.add('active');
         }
         
+        function switchRoundTab(event) {
+            // 获取所有轮次tab和轮次内容
+            const roundTabs = document.querySelectorAll('.round-tab');
+            const roundContents = document.querySelectorAll('.nested-tab-content');
+            
+            // 移除所有active类
+            roundTabs.forEach(tab => tab.classList.remove('active'));
+            roundContents.forEach(content => content.classList.remove('active'));
+            
+            // 获取点击的轮次tab的data-round属性
+            const roundIndex = event.target.getAttribute('data-round');
+            
+            // 添加active类到点击的轮次tab和对应的内容
+            event.target.classList.add('active');
+            document.getElementById(`round-${roundIndex}`).classList.add('active');
+        }
+        
         // 为所有tab添加点击事件
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', switchTab);
+        });
+        
+        // 为所有轮次tab添加点击事件
+        document.querySelectorAll('.round-tab').forEach(tab => {
+            tab.addEventListener('click', switchRoundTab);
         });
     </script>
 </body>
@@ -652,8 +745,8 @@ def save_results_as_html(all_results: Dict[str, List[TestResult]], output_dir: s
 '''
     
     # 保存文件
-    with open(file_path, "w", encoding="utf-8") as f:
+    with open(html_path, "w", encoding="utf-8") as f:
         f.write(html_content)
         
-    log_info(f"测试结果已保存到: {file_path}")
-    return file_path 
+    log_info(f"测试结果已保存到: {html_path}")
+    return html_path 
